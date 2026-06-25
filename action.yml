@@ -1,63 +1,72 @@
 name: 'Phala Cloud CVM Deployment'
-description: 'Deploy a Container Virtual Machine (CVM) to Phala Cloud'
-author: 'Your GitHub Username'
+description: 'Deploy a CVM to Phala Cloud using phala.toml configuration'
+author: 'Phala Network'
 branding:
   icon: 'cloud'
   color: 'blue'
 
-outputs:
-  cvm-id:
-    description: 'The ID of the created or updated CVM'
-  app-id:
-    description: 'The App ID of the created or updated CVM'
-  cvm-name:
-    description: 'The name used for the CVM (useful when auto-generated from repo name)'
-  deployment-status:
-    description: 'Status of the deployment (success/failed)'
-  deployment-url:
-    description: 'URL to access the deployed application'
-  operation:
-    description: 'The operation performed (create/update)'
-
 inputs:
-  phala-api-key:
+  api-key:
     description: 'Phala Cloud API Key for authentication'
     required: true
-  cvm-name:
-    description: 'Name for the CVM to be created'
-    required: false
-  compose-file:
-    description: 'Path to the docker-compose.yml file'
-    required: false
-    default: './docker-compose.yml'
-  vcpu:
-    description: 'Number of virtual CPUs for the CVM'
-    required: false
-    default: '2'
-  memory:
-    description: 'Memory size in MB for the CVM'
-    required: false
-    default: '2048'
-  disk-size:
-    description: 'Disk size in GB for the CVM'
-    required: false
-    default: '40'
   envs:
-    description: 'Environment variables in YAML format. Will be converted to dotenv format'
+    description: 'Environment variables (KEY=VALUE per line) from GitHub Secrets'
     required: false
     default: ''
+  cli-version:
+    description: 'Phala CLI version to install'
+    required: false
+    default: 'latest'
+
+outputs:
+  result:
+    description: 'Full CVM info as JSON'
+    value: ${{ steps.deploy.outputs.result }}
+  status:
+    description: 'Deployment status (success/failed)'
+    value: ${{ steps.deploy.outputs.status }}
   app-id:
-    description: 'App ID of an existing CVM to update. If provided, will update the existing CVM instead of creating a new one'
-    required: false
-    default: ''
-  node-id:
-    description: 'Node ID (Teepod ID)'
-    required: false
-    default: ''
-  base-image:
-    description: 'Base image to use for the CVM'
-    required: false
-    default: ''
+    description: 'App ID of the deployed CVM'
+    value: ${{ steps.deploy.outputs.app-id }}
+  vm-uuid:
+    description: 'VM UUID of the deployed CVM'
+    value: ${{ steps.deploy.outputs.vm-uuid }}
+  cvm-name:
+    description: 'Name of the deployed CVM'
+    value: ${{ steps.deploy.outputs.cvm-name }}
+  dashboard-url:
+    description: 'URL to the CVM dashboard'
+    value: ${{ steps.deploy.outputs.dashboard-url }}
+  compose-hash:
+    description: 'Normalized app-compose SHA256 hash'
+    value: ${{ steps.deploy.outputs.compose-hash }}
+  docker-compose-hash:
+    description: 'Raw docker-compose.yml SHA256 hash'
+    value: ${{ steps.deploy.outputs.docker-compose-hash }}
+  pre-launch-script-hash:
+    description: 'Pre-launch script SHA256 hash'
+    value: ${{ steps.deploy.outputs.pre-launch-script-hash }}
+  os-image:
+    description: 'OS image name'
+    value: ${{ steps.deploy.outputs.os-image }}
+  os-image-version:
+    description: 'OS image version'
+    value: ${{ steps.deploy.outputs.os-image-version }}
+  os-image-hash:
+    description: 'OS image hash'
+    value: ${{ steps.deploy.outputs.os-image-hash }}
+  kms-type:
+    description: 'Key management type (phala/ethereum/base)'
+    value: ${{ steps.deploy.outputs.kms-type }}
+  device-id:
+    description: 'Device ID from node info'
+    value: ${{ steps.deploy.outputs.device-id }}
+  oidc-repository:
+    description: 'Source repository from OIDC verification'
+    value: ${{ steps.deploy.outputs.oidc-repository }}
+  oidc-commit-sha:
+    description: 'Source commit SHA from OIDC verification'
+    value: ${{ steps.deploy.outputs.oidc-commit-sha }}
 
 runs:
   using: 'composite'
@@ -66,135 +75,118 @@ runs:
       uses: oven-sh/setup-bun@v1
       with:
         bun-version: latest
-        
-    - name: Install yq
+
+    - name: Validate phala.toml
       shell: bash
       run: |
-        wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
-        chmod +x /usr/local/bin/yq
-        
-    - name: Deploy to Phala Cloud
+        set -euo pipefail
+        if [[ ! -f "$GITHUB_WORKSPACE/phala.toml" ]]; then
+          echo "::error::phala.toml not found. Configure your CVM in phala.toml before deploying."
+          exit 1
+        fi
+
+    - name: Install Phala CLI
       shell: bash
       run: |
-        set -e
-        cd $GITHUB_WORKSPACE
-
-        bun install -g phala@1.0.34
-
-        export PHALA_CLOUD_API_KEY="${{ inputs.phala-api-key }}"
-
-        phala status
-
-        ENV_FLAG="--skip-env"
-        if [[ -n "${{ inputs.envs }}" ]]; then
-          # Convert YAML to dotenv format
-          echo "${{ inputs.envs }}" | yq -o=props --properties-separator="=" > .env
-          ENV_FLAG="-e .env"
-        elif [[ -n "${{ inputs.app-id }}" ]]; then
-          ENV_FLAG=""
+        set -euo pipefail
+        if [[ "$CLI_VERSION" == "latest" ]]; then
+          bun install -g phala
+        else
+          bun install -g "phala@$CLI_VERSION"
         fi
-        
-        # Determine the CVM name based on inputs or repo name
-        CVM_NAME="${{ inputs.cvm-name }}"
-        
-        # If CVM name is empty, try to use the repo name instead
-        if [[ -z "$CVM_NAME" ]]; then
-          # Extract repo name from GITHUB_REPOSITORY (format: owner/repo)
-          REPO_NAME=$(echo $GITHUB_REPOSITORY | cut -d'/' -f2)
-          
-          # Sanitize repo name to ensure it meets requirements:
-          # - Min 3 chars, max 20 chars
-          # - Only a-zA-Z0-9_- characters
-          CLEAN_REPO_NAME=$(echo $REPO_NAME | tr -cd 'a-zA-Z0-9_-')
-          
-          # Ensure it's at least 3 chars
-          if [[ ${#CLEAN_REPO_NAME} -ge 3 ]]; then
-            # Truncate to max 20 chars if needed
-            if [[ ${#CLEAN_REPO_NAME} -gt 20 ]]; then
-              CLEAN_REPO_NAME=${CLEAN_REPO_NAME:0:20}
-            fi
-            
-            # Use the cleaned repo name
-            CVM_NAME=$CLEAN_REPO_NAME
-            echo "Using repository name as CVM name: $CVM_NAME"
-          else
-            # Default to my-dstack-app if repo name is invalid
-            CVM_NAME="my-dstack-app"
-            echo "Repository name too short or invalid, using default: $CVM_NAME"
-          fi
-        fi
-        
-        # Check if we should try to update an existing CVM
-        if [[ -n "${{ inputs.app-id }}" ]]; then
-          echo "App ID provided, will update existing CVM..."
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
 
-          # Update the CVM
-          set +e
-          output=$(phala cvms upgrade --debug ${{ inputs.app-id }} \
-            --compose ${{ inputs.compose-file }} \
-            $ENV_FLAG 2>&1)
-          exit_code=$?
-          set -e
+    - name: Write env file
+      if: inputs.envs != ''
+      shell: bash
+      run: printf '%s\n' "$ENVS_INPUT" > "$GITHUB_WORKSPACE/.env"
+      env:
+        ENVS_INPUT: ${{ inputs.envs }}
 
-          # Output the CVM details
-          echo "$output" > /tmp/phala_output.txt
-
-          # Check for errors
-          if [ $exit_code -ne 0 ]; then
-            echo "::error::Failed to upgrade CVM (exit code: $exit_code)"
-            echo "::group::Full error output"
-            cat /tmp/phala_output.txt
-            echo "::endgroup::"
-            exit $exit_code
-          fi
-          
-          # Set outputs
-          echo "cvm-id=${{ inputs.app-id }}" >> $GITHUB_OUTPUT
-          echo "app-id=${{ inputs.app-id }}" >> $GITHUB_OUTPUT
-          echo "cvm-name=$CVM_NAME" >> $GITHUB_OUTPUT
-          
-          # Extract App URL or construct it
-          app_url=$(grep -oP "App URL │ \K[^\│]+" /tmp/phala_output.txt || echo "https://cloud.phala.network/dashboard/cvms/${{ inputs.app-id }}")
-          echo "deployment-url=$app_url" >> $GITHUB_OUTPUT
-          echo "deployment-status=success" >> $GITHUB_OUTPUT
-          echo "operation=update" >> $GITHUB_OUTPUT
-          
+    - name: Get OIDC token
+      id: oidc
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+          echo "OIDC not available, skipping"
           exit 0
         fi
-        
-        # If we didn't update an existing CVM, create a new one
-        echo "Creating new CVM with name: $CVM_NAME"
-        output=$(phala cvms create --name $CVM_NAME \
-          --compose ${{ inputs.compose-file }} \
-          --vcpu ${{ inputs.vcpu }} \
-          --memory ${{ inputs.memory }} \
-          --disk-size ${{ inputs.disk-size }} \
-          $ENV_FLAG)
-        
-        # Save output to a temporary file
-        echo "$output" > /tmp/phala_output.txt
-        
-        # Extract CVM ID using grep and regex
-        cvm_id=$(grep -oP "CVM ID     │ \K[0-9]+" /tmp/phala_output.txt || echo "")
-        echo "cvm-id=$cvm_id" >> $GITHUB_OUTPUT
-        
-        # Get App ID from the last line of output
-        app_id=$(tail -n 1 /tmp/phala_output.txt | grep -o "app_[a-zA-Z0-9]\+" || echo "")
-        echo "app-id=$app_id" >> $GITHUB_OUTPUT
-        echo "App ID: $app_id"
-        
-        # Save the CVM name we used
-        echo "cvm-name=$CVM_NAME" >> $GITHUB_OUTPUT
-        
-        # Extract App URL using grep and regex
-        app_url=$(grep -oP "App URL    │ \K[^│]+" /tmp/phala_output.txt | tr -d ' ' || echo "")
-        echo "deployment-url=$app_url" >> $GITHUB_OUTPUT
-        
-        # Set deployment status
-        if [ -n "$cvm_id" ] && [ -n "$app_id" ]; then
-          echo "deployment-status=success" >> $GITHUB_OUTPUT
-        else
-          echo "deployment-status=failed" >> $GITHUB_OUTPUT
+        OIDC_TOKEN=$(curl -sSL \
+          -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://cloud.phala.com" \
+          | jq -r '.value')
+        echo "::add-mask::$OIDC_TOKEN"
+        echo "PHALA_OIDC_TOKEN=$OIDC_TOKEN" >> "$GITHUB_ENV"
+
+    - name: Deploy to Phala Cloud
+      id: deploy
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "$GITHUB_WORKSPACE"
+
+        echo "::add-mask::$API_KEY"
+        export PHALA_CLOUD_API_KEY="$API_KEY"
+
+        ENV_FLAG=""
+        if [[ -n "$ENVS_INPUT" ]]; then
+          ENV_FLAG="-e .env"
         fi
-        
-        echo "operation=create" >> $GITHUB_OUTPUT
+
+        set +e
+        deploy_result=$(phala deploy --json $ENV_FLAG 2>&1)
+        exit_code=$?
+        set -e
+
+        if [[ $exit_code -ne 0 ]]; then
+          echo "::error::Deployment failed (exit code: $exit_code)"
+          echo "::group::Deploy output"
+          echo "$deploy_result"
+          echo "::endgroup::"
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+          echo "result<<RESULT_EOF" >> "$GITHUB_OUTPUT"
+          echo "$deploy_result" >> "$GITHUB_OUTPUT"
+          echo "RESULT_EOF" >> "$GITHUB_OUTPUT"
+          exit $exit_code
+        fi
+
+        success=$(echo "$deploy_result" | jq -r '.success // false')
+        if [[ "$success" != "true" ]]; then
+          error_msg=$(echo "$deploy_result" | jq -r '.error // .message // "unknown error"')
+          echo "::error::$error_msg"
+          echo "status=failed" >> "$GITHUB_OUTPUT"
+          echo "result<<RESULT_EOF" >> "$GITHUB_OUTPUT"
+          echo "$deploy_result" >> "$GITHUB_OUTPUT"
+          echo "RESULT_EOF" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
+        vm_uuid=$(echo "$deploy_result" | jq -r '.vm_uuid // empty')
+        echo "vm-uuid=$vm_uuid" >> "$GITHUB_OUTPUT"
+        echo "app-id=$(echo "$deploy_result" | jq -r '.app_id // empty')" >> "$GITHUB_OUTPUT"
+        echo "cvm-name=$(echo "$deploy_result" | jq -r '.name // empty')" >> "$GITHUB_OUTPUT"
+        echo "dashboard-url=$(echo "$deploy_result" | jq -r '.dashboard_url // empty')" >> "$GITHUB_OUTPUT"
+
+        # Query full CVM info for verification fields
+        cvm_info=$(phala api "/cvms/$vm_uuid" 2>&1)
+
+        echo "status=success" >> "$GITHUB_OUTPUT"
+        echo "result<<RESULT_EOF" >> "$GITHUB_OUTPUT"
+        echo "$cvm_info" >> "$GITHUB_OUTPUT"
+        echo "RESULT_EOF" >> "$GITHUB_OUTPUT"
+
+        echo "compose-hash=$(echo "$cvm_info" | jq -r '.compose_hash // empty')" >> "$GITHUB_OUTPUT"
+        echo "docker-compose-hash=$(echo "$cvm_info" | jq -r '.docker_compose_hash // empty')" >> "$GITHUB_OUTPUT"
+        echo "pre-launch-script-hash=$(echo "$cvm_info" | jq -r '.pre_launch_script_hash // empty')" >> "$GITHUB_OUTPUT"
+        echo "os-image=$(echo "$cvm_info" | jq -r '.os.name // empty')" >> "$GITHUB_OUTPUT"
+        echo "os-image-version=$(echo "$cvm_info" | jq -r '.os.version // empty')" >> "$GITHUB_OUTPUT"
+        echo "os-image-hash=$(echo "$cvm_info" | jq -r '.os.os_image_hash // empty')" >> "$GITHUB_OUTPUT"
+        echo "kms-type=$(echo "$cvm_info" | jq -r '.kms_type // empty')" >> "$GITHUB_OUTPUT"
+        echo "device-id=$(echo "$cvm_info" | jq -r '.node_info.device_id // empty')" >> "$GITHUB_OUTPUT"
+        echo "oidc-repository=$(echo "$cvm_info" | jq -r '.oidc_provenance.repository // empty')" >> "$GITHUB_OUTPUT"
+        echo "oidc-commit-sha=$(echo "$cvm_info" | jq -r '.oidc_provenance.commit_sha // empty')" >> "$GITHUB_OUTPUT"
+      env:
+        API_KEY: ${{ inputs.api-key }}
+        ENVS_INPUT: ${{ inputs.envs }}
