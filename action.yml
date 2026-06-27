@@ -7,8 +7,9 @@ branding:
 
 inputs:
   api-key:
-    description: 'Phala Cloud API Key for authentication'
-    required: true
+    description: 'Phala Cloud API Key. Optional when OIDC is enabled (permissions: id-token: write)'
+    required: false
+    default: ''
   envs:
     description: 'Environment variables (KEY=VALUE per line) from GitHub Secrets'
     required: false
@@ -16,14 +17,14 @@ inputs:
   cli-version:
     description: 'Phala CLI version to install'
     required: false
-    default: 'latest'
+    default: '1.1.19'
 
 outputs:
   result:
     description: 'Full CVM info as JSON'
     value: ${{ steps.deploy.outputs.result }}
   status:
-    description: 'Deployment status (success/failed)'
+    description: 'Deployment status (success/failed/pending_approval)'
     value: ${{ steps.deploy.outputs.status }}
   app-id:
     description: 'App ID of the deployed CVM'
@@ -67,6 +68,9 @@ outputs:
   oidc-commit-sha:
     description: 'Source commit SHA from OIDC verification'
     value: ${{ steps.deploy.outputs.oidc-commit-sha }}
+  commit-token:
+    description: 'Commit token for 2-step deployment (on-chain KMS)'
+    value: ${{ steps.deploy.outputs.commit-token }}
 
 runs:
   using: 'composite'
@@ -89,11 +93,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        if [[ "$CLI_VERSION" == "latest" ]]; then
-          bun install -g phala
-        else
-          bun install -g "phala@$CLI_VERSION"
-        fi
+        bun install -g "phala@$CLI_VERSION"
       env:
         CLI_VERSION: ${{ inputs.cli-version }}
 
@@ -104,21 +104,33 @@ runs:
       env:
         ENVS_INPUT: ${{ inputs.envs }}
 
-    - name: Get OIDC token
-      id: oidc
+    - name: Authenticate
+      id: auth
       shell: bash
       run: |
         set -euo pipefail
-        if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
-          echo "OIDC not available, skipping"
-          exit 0
+
+        # Try OIDC first
+        if [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+          OIDC_TOKEN=$(curl -sSL \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://cloud.phala.com" \
+            | jq -r '.value')
+          echo "::add-mask::$OIDC_TOKEN"
+          echo "PHALA_OIDC_TOKEN=$OIDC_TOKEN" >> "$GITHUB_ENV"
+          echo "oidc=true" >> "$GITHUB_OUTPUT"
         fi
-        OIDC_TOKEN=$(curl -sSL \
-          -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-          "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://cloud.phala.com" \
-          | jq -r '.value')
-        echo "::add-mask::$OIDC_TOKEN"
-        echo "PHALA_OIDC_TOKEN=$OIDC_TOKEN" >> "$GITHUB_ENV"
+
+        # Set API key if provided
+        if [[ -n "$API_KEY" ]]; then
+          echo "::add-mask::$API_KEY"
+          echo "PHALA_CLOUD_API_KEY=$API_KEY" >> "$GITHUB_ENV"
+        elif [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+          echo "::error::No authentication method available. Provide api-key or enable OIDC (permissions: id-token: write)."
+          exit 1
+        fi
+      env:
+        API_KEY: ${{ inputs.api-key }}
 
     - name: Deploy to Phala Cloud
       id: deploy
@@ -126,9 +138,6 @@ runs:
       run: |
         set -euo pipefail
         cd "$GITHUB_WORKSPACE"
-
-        echo "::add-mask::$API_KEY"
-        export PHALA_CLOUD_API_KEY="$API_KEY"
 
         ENV_FLAG=""
         if [[ -n "$ENVS_INPUT" ]]; then
@@ -139,6 +148,23 @@ runs:
         deploy_result=$(phala deploy --json $ENV_FLAG 2>&1)
         exit_code=$?
         set -e
+
+        # Check for prepare_only response (on-chain KMS 2-step deployment)
+        prepare_only=$(echo "$deploy_result" | jq -r '.prepare_only // false' 2>/dev/null || echo "false")
+
+        if [[ "$prepare_only" == "true" ]]; then
+          echo "::warning::Deployment requires on-chain approval before it can be finalized."
+          echo "::warning::Compose hash: $(echo "$deploy_result" | jq -r '.compose_hash // empty')"
+          echo "::warning::Visit the dashboard to approve and commit the update."
+          echo "status=pending_approval" >> "$GITHUB_OUTPUT"
+          echo "compose-hash=$(echo "$deploy_result" | jq -r '.compose_hash // empty')" >> "$GITHUB_OUTPUT"
+          echo "commit-token=$(echo "$deploy_result" | jq -r '.commit_token // empty')" >> "$GITHUB_OUTPUT"
+          echo "app-id=$(echo "$deploy_result" | jq -r '.app_id // empty')" >> "$GITHUB_OUTPUT"
+          echo "result<<RESULT_EOF" >> "$GITHUB_OUTPUT"
+          echo "$deploy_result" >> "$GITHUB_OUTPUT"
+          echo "RESULT_EOF" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
 
         if [[ $exit_code -ne 0 ]]; then
           echo "::error::Deployment failed (exit code: $exit_code)"
@@ -188,5 +214,4 @@ runs:
         echo "oidc-repository=$(echo "$cvm_info" | jq -r '.oidc_provenance.repository // empty')" >> "$GITHUB_OUTPUT"
         echo "oidc-commit-sha=$(echo "$cvm_info" | jq -r '.oidc_provenance.commit_sha // empty')" >> "$GITHUB_OUTPUT"
       env:
-        API_KEY: ${{ inputs.api-key }}
         ENVS_INPUT: ${{ inputs.envs }}

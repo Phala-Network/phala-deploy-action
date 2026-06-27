@@ -1,145 +1,135 @@
 # Phala Cloud CVM Deployment Action
 
-This GitHub Action helps you easily deploy Container Virtual Machines (CVMs) to Phala Cloud.
+Deploy CVMs to Phala Cloud using `phala.toml` configuration.
 
-## Features
+## Prerequisites
 
-- Automatic setup of Bun runtime environment
-- Installation of Phala CLI tools
-- Authentication to Phala Cloud using your API key
-- Creation of CVMs with specified configurations
-- Support for updating existing CVMs
+Your repository must contain a `phala.toml` file. All CVM configuration (name, compose file, instance type, region, privacy settings, etc.) is defined there. See [phala.toml documentation](https://docs.phala.network/) for the full schema.
 
 ## Usage
 
-### Basic Usage
+### Basic (API Key)
 
 ```yaml
 name: Deploy to Phala Cloud
-
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Deploy to Phala Cloud
-        uses: Leechael/phala-deploy-action@v3
+      - uses: actions/checkout@v4
+      - uses: Phala-Network/phala-deploy-action@main
         with:
-          phala-api-key: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          api-key: ${{ secrets.PHALA_API_KEY }}
 ```
 
-### Complete Configuration Options
+### Keyless with OIDC
+
+No API key needed. Requires a [trusted repository](https://docs.phala.network/) configured in your Phala Cloud workspace.
 
 ```yaml
-- name: Deploy to Phala Cloud
-  uses: Leechael/phala-deploy-action@v3
-  with:
-    # Required parameters
-    phala-api-key: ${{ secrets.PHALA_CLOUD_API_KEY }}
-    
-    # Optional parameters (with defaults)
-    cvm-name: 'my-app'                # Default: repository name (sanitized) or 'my-dstack-app'
-    compose-file: './my-compose.yml'  # Default: './docker-compose.yml'
-    vcpu: '4'                         # Default: '2'
-    memory: '4096'                    # Default: '2048'
-    disk-size: '10'                   # Default: '40'
-    envs: |                           # Environment variables in YAML format (will be converted to dotenv)
-      DATABASE_URL: postgresql://user:pass@localhost:5432/db
-      API_KEY: your-api-key
-      DEBUG: true
-      REDIS_PORT: 6379
-    app-id: ''                        # App ID of existing CVM to update
-    node-id: ''                       # Node ID (Teepod ID)
-    base-image: ''                    # Base image to use for the CVM
-```
-
-## Input Parameters
-
-| Parameter | Description | Required | Default |
-|-----------|-------------|----------|---------|
-| `phala-api-key` | Phala Cloud API Key for authentication | Yes | - |
-| `cvm-name` | Name for the CVM | No | Repository name (sanitized) or 'my-dstack-app' |
-| `compose-file` | Path to docker-compose.yml file | No | './docker-compose.yml' |
-| `vcpu` | Number of virtual CPUs | No | '2' |
-| `memory` | Memory size in MB | No | '2048' |
-| `disk-size` | Disk size in GB | No | '40' |
-| `envs` | Environment variables in YAML format (simple key-value pairs, will be converted to dotenv format) | No | '' |
-| `app-id` | App ID of existing CVM to update | No | '' |
-| `node-id` | Node ID (Teepod ID) | No | '' |
-| `base-image` | Base image to use for the CVM | No | '' |
-
-## Output Parameters
-
-| Parameter | Description |
-|-----------|-------------|
-| `cvm-id` | The ID of the created or updated CVM |
-| `app-id` | The App ID of the created or updated CVM |
-| `cvm-name` | The name used for the CVM (useful when auto-generated from repo name) |
-| `deployment-status` | Status of the deployment (success/failed) |
-| `deployment-url` | URL to access the deployed application |
-| `operation` | The operation performed (create/update) |
-
-## Security Notes
-
-- Store your Phala Cloud API key in GitHub Secrets
-- Ensure proper API key permissions when using in public repositories
-
-## Example: Initial Deployment and App ID Storage
-
-This example shows how to create a CVM and store its app-id for future updates:
-
-```yaml
-name: Initial Deployment
-
+name: Deploy to Phala Cloud
 on:
   push:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  id-token: write
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Deploy to Phala Cloud
+      - uses: actions/checkout@v4
+      - uses: Phala-Network/phala-deploy-action@main
+```
+
+### Auto-deploy on config change
+
+Trigger deployment when `phala.toml` or the compose file changes:
+
+```yaml
+name: Deploy to Phala Cloud
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'phala.toml'
+      - 'docker-compose.yml'
+
+permissions:
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Phala-Network/phala-deploy-action@main
+        with:
+          api-key: ${{ secrets.PHALA_API_KEY }}
+```
+
+### With environment variables from secrets
+
+```yaml
+      - uses: Phala-Network/phala-deploy-action@main
+        with:
+          api-key: ${{ secrets.PHALA_API_KEY }}
+          envs: |
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            REDIS_URL=${{ secrets.REDIS_URL }}
+```
+
+### On-chain KMS (2-step deployment)
+
+For CVMs using on-chain KMS, the action exits successfully with `status=pending_approval` instead of failing. The compose hash must be approved on-chain before the update takes effect.
+
+```yaml
+      - uses: Phala-Network/phala-deploy-action@main
         id: deploy
-        uses: Leechael/phala-deploy-action@v3
         with:
-          phala-api-key: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          api-key: ${{ secrets.PHALA_API_KEY }}
+
+      - name: Check deployment status
+        if: steps.deploy.outputs.status == 'pending_approval'
+        run: |
+          echo "Deployment requires on-chain approval"
+          echo "Compose hash: ${{ steps.deploy.outputs.compose-hash }}"
 ```
 
-## Example: Update Existing CVM
+## Inputs
 
-This example shows how to update an existing CVM using the stored app-id in a subsequent workflow run:
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `api-key` | Phala Cloud API Key. Optional when OIDC is enabled | No | |
+| `envs` | Environment variables (KEY=VALUE per line) | No | |
+| `cli-version` | Phala CLI version | No | `1.1.19` |
 
-```yaml
-name: Update CVM
+## Outputs
 
-on:
-  push:
-    branches: [ main ]
-
-jobs:
-  update:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Update CVM
-        uses: Leechael/phala-deploy-action@v3
-        with:
-          phala-api-key: ${{ secrets.PHALA_CLOUD_API_KEY }}
-          app-id: ${{ secrets.PHALA_CLOUD_APP_ID }}
-```
-
-## Contributing
-
-Contributions are welcome through Pull Requests or Issues.
+| Output | Description |
+|--------|-------------|
+| `result` | Full CVM info as JSON |
+| `status` | `success`, `failed`, or `pending_approval` |
+| `app-id` | App ID |
+| `vm-uuid` | VM UUID |
+| `cvm-name` | CVM name |
+| `dashboard-url` | Dashboard URL |
+| `compose-hash` | Normalized app-compose SHA256 |
+| `docker-compose-hash` | Raw docker-compose.yml SHA256 |
+| `pre-launch-script-hash` | Pre-launch script SHA256 |
+| `os-image` | OS image name |
+| `os-image-version` | OS image version |
+| `os-image-hash` | OS image hash |
+| `kms-type` | Key management type |
+| `device-id` | Device ID |
+| `oidc-repository` | Source repository (OIDC) |
+| `oidc-commit-sha` | Source commit SHA (OIDC) |
+| `commit-token` | Commit token for 2-step deployment |
 
 ## License
 
