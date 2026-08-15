@@ -28,7 +28,13 @@ jobs:
 
 ### Keyless with OIDC
 
-No API key needed. Requires a [trusted repository](https://docs.phala.network/) configured in your Phala Cloud workspace.
+No API key needed. Requires:
+
+1. A **trusted repository** registered in your Phala Cloud workspace (admin/owner).
+2. Workflow permission `id-token: write`.
+3. Phala CLI with OIDC bearer support (`PHALA_OIDC_TOKEN` → `Authorization: Bearer`).
+
+The action requests a GitHub OIDC token with audience `https://cloud.phala.com` (override via `oidc-audience` if your Cloud `APP_URL` differs) and sets `PHALA_OIDC_TOKEN` for the CLI.
 
 ```yaml
 name: Deploy to Phala Cloud
@@ -45,6 +51,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Phala-Network/phala-deploy-action@main
+        with:
+          # Optional: required when this GitHub repo is trusted in multiple workspaces
+          # workspace: my-workspace-slug
 ```
 
 ### Auto-deploy on config change
@@ -107,7 +116,9 @@ For CVMs using on-chain KMS, the action exits successfully with `status=pending_
 |-------|-------------|----------|---------|
 | `api-key` | Phala Cloud API Key. Optional when OIDC is enabled | No | |
 | `envs` | Environment variables (KEY=VALUE per line) | No | |
-| `cli-version` | Phala CLI version | No | `1.1.19` |
+| `workspace` | Workspace slug (`X-Phala-Workspace`). Use when the repo is trusted in multiple workspaces | No | |
+| `oidc-audience` | OIDC audience (must match Cloud `APP_URL`) | No | `https://cloud.phala.com` |
+| `cli-version` | Phala CLI version (needs OIDC bearer support for keyless) | No | `latest` |
 
 ## Outputs
 
@@ -127,8 +138,8 @@ For CVMs using on-chain KMS, the action exits successfully with `status=pending_
 | `os-image-hash` | OS image hash |
 | `kms-type` | Key management type |
 | `device-id` | Device ID |
-| `oidc-repository` | Source repository (OIDC) |
-| `oidc-commit-sha` | Source commit SHA (OIDC) |
+| `oidc-repository` | Source repository when API returns `oidc_provenance` (may be empty) |
+| `oidc-commit-sha` | Source commit SHA when API returns `oidc_provenance` (may be empty) |
 | `commit-token` | Commit token for 2-step deployment |
 
 ## License
