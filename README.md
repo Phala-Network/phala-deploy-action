@@ -32,7 +32,7 @@ No API key needed. Requires:
 
 1. A **trusted repository** registered in your Phala Cloud workspace (admin/owner).
 2. Workflow permission `id-token: write`.
-3. Phala CLI with OIDC bearer support (`PHALA_OIDC_TOKEN` → `Authorization: Bearer`).
+3. Phala CLI `>=1.1.22-beta.1` (default in this action) so `PHALA_OIDC_TOKEN` is sent as `Authorization: Bearer`.
 
 The action requests a GitHub OIDC token with audience `https://cloud.phala.com` (override via `oidc-audience` if your Cloud `APP_URL` differs) and sets `PHALA_OIDC_TOKEN` for the CLI.
 
@@ -118,7 +118,7 @@ For CVMs using on-chain KMS, the action exits successfully with `status=pending_
 | `envs` | Environment variables (KEY=VALUE per line) | No | |
 | `workspace` | Workspace slug (`X-Phala-Workspace`). Use when the repo is trusted in multiple workspaces | No | |
 | `oidc-audience` | OIDC audience (must match Cloud `APP_URL`) | No | `https://cloud.phala.com` |
-| `cli-version` | Phala CLI version (needs OIDC bearer support for keyless) | No | `latest` |
+| `cli-version` | Phala CLI version (keyless OIDC needs `>=1.1.22-beta.1`) | No | `1.1.22-beta.1` |
 
 ## Outputs
 

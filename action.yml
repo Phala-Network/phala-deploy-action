@@ -23,9 +23,9 @@ inputs:
     required: false
     default: 'https://cloud.phala.com'
   cli-version:
-    description: 'Phala CLI version to install (requires OIDC bearer support, e.g. >=1.1.22 when released; use a git/npm tag that includes PHALA_OIDC_TOKEN support)'
+    description: 'Phala CLI version to install. Keyless OIDC requires >=1.1.22-beta.1 (PHALA_OIDC_TOKEN bearer support). Do not use npm tag latest until a stable release includes OIDC.'
     required: false
-    default: 'latest'
+    default: '1.1.22-beta.1'
 
 outputs:
   result:
