@@ -34,14 +34,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: Phala-Network/phala-deploy-action@main
+      - uses: Phala-Network/phala-deploy-action@v3
         with:
           api-key: ${{ secrets.PHALA_API_KEY }}
 ```
 
-### Keyless with OIDC
+### Keyless with OIDC (Beta)
 
-No API key needed. Requires:
+No API key needed. This feature is in **Beta** and is enabled per workspace. Contact Phala Cloud support to turn it on for your workspace before using it. Requires:
 
 1. A **trusted repository** registered in your Phala Cloud workspace (admin/owner).
 2. Workflow permissions `id-token: write` for OIDC and `contents: read` for checkout.
@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: Phala-Network/phala-deploy-action@main
+      - uses: Phala-Network/phala-deploy-action@v3
         # with:
           # Optional: required when this GitHub repo is trusted in multiple workspaces
           # workspace: my-workspace-slug
@@ -92,7 +92,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: Phala-Network/phala-deploy-action@main
+      - uses: Phala-Network/phala-deploy-action@v3
         with:
           api-key: ${{ secrets.PHALA_API_KEY }}
 ```
@@ -100,7 +100,7 @@ jobs:
 ### With environment variables from secrets
 
 ```yaml
-      - uses: Phala-Network/phala-deploy-action@main
+      - uses: Phala-Network/phala-deploy-action@v3
         with:
           api-key: ${{ secrets.PHALA_API_KEY }}
           envs: |
@@ -113,7 +113,7 @@ jobs:
 For CVMs using on-chain KMS, the action exits successfully with `status=pending_approval` instead of failing. The compose hash must be approved on-chain before the update takes effect.
 
 ```yaml
-      - uses: Phala-Network/phala-deploy-action@main
+      - uses: Phala-Network/phala-deploy-action@v3
         id: deploy
         with:
           api-key: ${{ secrets.PHALA_API_KEY }}
