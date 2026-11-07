@@ -10,7 +10,7 @@ For self-hosted runners, use Actions Runner `2.327.1` or newer: `setup-bun@v2.2.
 
 ## Deployment completion
 
-The action installs Phala CLI `1.2.1` by default and runs `phala deploy --json --wait`.
+The action installs Phala CLI `1.2.2` by default and runs `phala deploy --json --wait`.
 
 - For updates, it waits for the CVM to return to its pre-update power state, then checks the update operation outcome. A stopped CVM stays stopped.
 - A failed or cancelled update causes the action to fail, including with keyless OIDC authentication. Success no longer means only that the update request was accepted.
@@ -45,7 +45,7 @@ No API key needed. Requires:
 
 1. A **trusted repository** registered in your Phala Cloud workspace (admin/owner).
 2. Workflow permissions `id-token: write` for OIDC and `contents: read` for checkout.
-3. Phala CLI `>=1.2.1` (`1.2.1` by default in this action) for OIDC authentication and update outcome checks.
+3. Phala CLI `>=1.2.1` (`1.2.2` by default in this action) for OIDC authentication and update outcome checks.
 
 The action requests a GitHub OIDC token with audience `https://cloud.phala.com` (override via `oidc-audience` if your Cloud `APP_URL` differs) and sets `PHALA_OIDC_TOKEN` for the CLI. When waiting for an update, the CLI reads its operation outcome using the same token and a correlation ID scoped to the deployment target; no API key is needed.
 
@@ -133,7 +133,7 @@ For CVMs using on-chain KMS, the action exits successfully with `status=pending_
 | `envs` | Environment variables (KEY=VALUE per line) | No | |
 | `workspace` | Workspace slug (`X-Phala-Workspace`). Use when the repo is trusted in multiple workspaces | No | |
 | `oidc-audience` | OIDC audience (must match Cloud `APP_URL`) | No | `https://cloud.phala.com` |
-| `cli-version` | Phala CLI version (use `>=1.2.1` for OIDC outcome checks and stopped-CVM waiting) | No | `1.2.1` |
+| `cli-version` | Phala CLI version (use `>=1.2.1` for OIDC outcome checks and stopped-CVM waiting) | No | `1.2.2` |
 
 ## Outputs
 
