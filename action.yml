@@ -25,7 +25,7 @@ inputs:
   cli-version:
     description: 'Phala CLI version to install. Use >=1.2.1 for OIDC update outcome checks and correct waiting on stopped CVMs.'
     required: false
-    default: '1.2.1'
+    default: '1.2.2'
 
 outputs:
   result:
