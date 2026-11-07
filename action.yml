@@ -14,10 +14,18 @@ inputs:
     description: 'Environment variables (KEY=VALUE per line) from GitHub Secrets'
     required: false
     default: ''
-  cli-version:
-    description: 'Phala CLI version to install'
+  workspace:
+    description: 'Phala Cloud workspace slug (X-Phala-Workspace). Required when the GitHub repo is trusted in more than one workspace.'
     required: false
-    default: '1.1.19'
+    default: ''
+  oidc-audience:
+    description: 'OIDC token audience. Must match Phala Cloud APP_URL (production default https://cloud.phala.com).'
+    required: false
+    default: 'https://cloud.phala.com'
+  cli-version:
+    description: 'Phala CLI version to install. Keyless OIDC requires >=1.1.22-beta.1 (PHALA_OIDC_TOKEN bearer support). Do not use npm tag latest until a stable release includes OIDC.'
+    required: false
+    default: '1.1.22-beta.1'
 
 outputs:
   result:
@@ -63,10 +71,10 @@ outputs:
     description: 'Device ID from node info'
     value: ${{ steps.deploy.outputs.device-id }}
   oidc-repository:
-    description: 'Source repository from OIDC verification'
+    description: 'Source repository from OIDC provenance when the API returns it (may be empty)'
     value: ${{ steps.deploy.outputs.oidc-repository }}
   oidc-commit-sha:
-    description: 'Source commit SHA from OIDC verification'
+    description: 'Source commit SHA from OIDC provenance when the API returns it (may be empty)'
     value: ${{ steps.deploy.outputs.oidc-commit-sha }}
   commit-token:
     description: 'Commit token for 2-step deployment (on-chain KMS)'
@@ -110,18 +118,27 @@ runs:
       run: |
         set -euo pipefail
 
-        # Try OIDC first
+        if [[ -n "$WORKSPACE" ]]; then
+          echo "PHALA_CLOUD_WORKSPACE=$WORKSPACE" >> "$GITHUB_ENV"
+        fi
+
+        # Prefer OIDC when the workflow granted id-token: write.
+        # CLI/SDK send PHALA_OIDC_TOKEN as Authorization: Bearer on deploy routes.
         if [[ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
           OIDC_TOKEN=$(curl -sSL \
             -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://cloud.phala.com" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${OIDC_AUDIENCE}" \
             | jq -r '.value')
+          if [[ -z "$OIDC_TOKEN" || "$OIDC_TOKEN" == "null" ]]; then
+            echo "::error::Failed to obtain GitHub Actions OIDC token. Check permissions: id-token: write and oidc-audience."
+            exit 1
+          fi
           echo "::add-mask::$OIDC_TOKEN"
           echo "PHALA_OIDC_TOKEN=$OIDC_TOKEN" >> "$GITHUB_ENV"
           echo "oidc=true" >> "$GITHUB_OUTPUT"
         fi
 
-        # Set API key if provided
+        # API key is optional when OIDC is available. When both are set, CLI prefers the API key.
         if [[ -n "$API_KEY" ]]; then
           echo "::add-mask::$API_KEY"
           echo "PHALA_CLOUD_API_KEY=$API_KEY" >> "$GITHUB_ENV"
@@ -131,6 +148,8 @@ runs:
         fi
       env:
         API_KEY: ${{ inputs.api-key }}
+        WORKSPACE: ${{ inputs.workspace }}
+        OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
 
     - name: Deploy to Phala Cloud
       id: deploy
@@ -195,8 +214,16 @@ runs:
         echo "cvm-name=$(echo "$deploy_result" | jq -r '.name // empty')" >> "$GITHUB_OUTPUT"
         echo "dashboard-url=$(echo "$deploy_result" | jq -r '.dashboard_url // empty')" >> "$GITHUB_OUTPUT"
 
-        # Query full CVM info for verification fields
-        cvm_info=$(phala api "/cvms/$vm_uuid" 2>&1)
+        # Prefer deploy JSON. GET /cvms requires session/API-key auth — OIDC is
+        # deploy-route-only on the server, so skip the follow-up when keyless.
+        cvm_info="$deploy_result"
+        if [[ -n "${PHALA_CLOUD_API_KEY:-}" && -n "$vm_uuid" ]]; then
+          if fetched=$(phala api "/cvms/$vm_uuid" 2>/dev/null); then
+            cvm_info="$fetched"
+          else
+            echo "::warning::Deploy succeeded but failed to fetch CVM details; using deploy response fields only."
+          fi
+        fi
 
         echo "status=success" >> "$GITHUB_OUTPUT"
         echo "result<<RESULT_EOF" >> "$GITHUB_OUTPUT"
@@ -211,6 +238,7 @@ runs:
         echo "os-image-hash=$(echo "$cvm_info" | jq -r '.os.os_image_hash // empty')" >> "$GITHUB_OUTPUT"
         echo "kms-type=$(echo "$cvm_info" | jq -r '.kms_type // empty')" >> "$GITHUB_OUTPUT"
         echo "device-id=$(echo "$cvm_info" | jq -r '.node_info.device_id // empty')" >> "$GITHUB_OUTPUT"
+        # Provenance may be empty until the Cloud API exposes oidc_provenance on CVM GET.
         echo "oidc-repository=$(echo "$cvm_info" | jq -r '.oidc_provenance.repository // empty')" >> "$GITHUB_OUTPUT"
         echo "oidc-commit-sha=$(echo "$cvm_info" | jq -r '.oidc_provenance.commit_sha // empty')" >> "$GITHUB_OUTPUT"
       env:
