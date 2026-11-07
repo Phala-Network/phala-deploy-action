@@ -6,6 +6,8 @@ Deploy CVMs to Phala Cloud using `phala.toml` configuration.
 
 Your repository must contain a `phala.toml` file. All CVM configuration (name, compose file, instance type, region, privacy settings, etc.) is defined there. See [phala.toml documentation](https://docs.phala.network/) for the full schema.
 
+For self-hosted runners, use Actions Runner `2.327.1` or newer: `setup-bun@v2.2.0` and the checkout version shown below use Node.js 24. GitHub-hosted `ubuntu-latest` runners support this runtime.
+
 ## Usage
 
 ### Basic (API Key)
@@ -20,7 +22,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: Phala-Network/phala-deploy-action@main
         with:
           api-key: ${{ secrets.PHALA_API_KEY }}
@@ -31,7 +33,7 @@ jobs:
 No API key needed. Requires:
 
 1. A **trusted repository** registered in your Phala Cloud workspace (admin/owner).
-2. Workflow permission `id-token: write`.
+2. Workflow permissions `id-token: write` for OIDC and `contents: read` for checkout.
 3. Phala CLI `>=1.1.22-beta.1` (default in this action) so `PHALA_OIDC_TOKEN` is sent as `Authorization: Bearer`.
 
 The action requests a GitHub OIDC token with audience `https://cloud.phala.com` (override via `oidc-audience` if your Cloud `APP_URL` differs) and sets `PHALA_OIDC_TOKEN` for the CLI.
@@ -43,15 +45,16 @@ on:
     branches: [main]
 
 permissions:
+  contents: read
   id-token: write
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: Phala-Network/phala-deploy-action@main
-        with:
+        # with:
           # Optional: required when this GitHub repo is trusted in multiple workspaces
           # workspace: my-workspace-slug
 ```
@@ -70,13 +73,14 @@ on:
       - 'docker-compose.yml'
 
 permissions:
+  contents: read
   id-token: write
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: Phala-Network/phala-deploy-action@main
         with:
           api-key: ${{ secrets.PHALA_API_KEY }}
