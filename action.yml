@@ -23,9 +23,9 @@ inputs:
     required: false
     default: 'https://cloud.phala.com'
   cli-version:
-    description: 'Phala CLI version to install. Keyless OIDC requires >=1.1.22-beta.1 (PHALA_OIDC_TOKEN bearer support). Do not use npm tag latest until a stable release includes OIDC.'
+    description: 'Phala CLI version to install. Use >=1.2.1 for OIDC update outcome checks and correct waiting on stopped CVMs.'
     required: false
-    default: '1.1.22-beta.1'
+    default: '1.2.1'
 
 outputs:
   result:
@@ -164,7 +164,7 @@ runs:
         fi
 
         set +e
-        deploy_result=$(phala deploy --json $ENV_FLAG 2>&1)
+        deploy_result=$(phala deploy --json --wait $ENV_FLAG 2>&1)
         exit_code=$?
         set -e
 
@@ -214,8 +214,8 @@ runs:
         echo "cvm-name=$(echo "$deploy_result" | jq -r '.name // empty')" >> "$GITHUB_OUTPUT"
         echo "dashboard-url=$(echo "$deploy_result" | jq -r '.dashboard_url // empty')" >> "$GITHUB_OUTPUT"
 
-        # Prefer deploy JSON. GET /cvms requires session/API-key auth — OIDC is
-        # deploy-route-only on the server, so skip the follow-up when keyless.
+        # Prefer deploy JSON for keyless auth. The CLI performs the scoped OIDC
+        # operation outcome check; only fetch extra CVM details with an API key.
         cvm_info="$deploy_result"
         if [[ -n "${PHALA_CLOUD_API_KEY:-}" && -n "$vm_uuid" ]]; then
           if fetched=$(phala api "/cvms/$vm_uuid" 2>/dev/null); then
